@@ -1,0 +1,76 @@
+name: Codex Pull Request Created
+
+on:
+  pull_request:
+    types: [opened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codex-pr-created:
+    if: (github.event.action == 'opened' && contains(github.event.pull_request.labels.*.name, 'codex')) || (github.event.action == 'labeled' && github.event.label.name == 'codex')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          if [ ! -f package.json ]; then
+            echo "frontend/package.json not found." >&2
+            exit 1
+          fi
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build frontend to dist
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Upload frontend dist to S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_file=".env.dev"
+          if [[ ! -f "$env_file" ]]; then
+            echo "Missing environment file: $env_file" >&2
+            exit 1
+          fi
+
+          set -a
+          # shellcheck disable=SC1090
+          source "$env_file"
+          set +a
+
+          if [[ -z "${frontend_bucket_name:-}" ]]; then
+            echo "frontend_bucket_name missing in $env_file" >&2
+            exit 1
+          fi
+
+          aws s3 sync frontend/dist "s3://${frontend_bucket_name}/" --delete

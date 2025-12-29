@@ -1,0 +1,101 @@
+name: Codex Tagged Issue
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write 
+  pull-requests: write
+  issues: write
+
+jobs:
+  codex-tag-detected:
+    if: contains(github.event.issue.labels.*.name, 'codex')
+    runs-on: ubuntu-latest
+    env:
+      DEFAULT_BRANCH: main
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js (Codex CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Prepare working branch
+        id: branch
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER=${{ github.event.issue.number }}
+          SAFE_TITLE=$(echo "${{ github.event.issue.title }}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//' | cut -c1-40)
+          BRANCH="codex/issue-${ISSUE_NUMBER}-${SAFE_TITLE:-update}"
+
+          git checkout "$DEFAULT_BRANCH"
+          git pull --ff-only origin "$DEFAULT_BRANCH"
+          git checkout -B "$BRANCH"
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Run Codex CLI on issue
+        env:
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          echo "Running Codex CLI for issue #${{ github.event.issue.number }} on branch ${BRANCH_NAME}"
+
+          # Write the issue title/body into the instructions file (expand env vars).
+          cat <<EOF > /tmp/codex-instructions.txt
+          ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+          EOF
+
+          # Replace the command below with the organization-specific Codex CLI invocation.
+          # Expectation: the CLI applies changes according to /tmp/codex-instructions.txt on the current branch.
+          cat /tmp/codex-instructions.txt | codex exec --sandbox workspace-write --model gpt-5.1-codex-max
+
+      - name: Commit and push changes
+        id: commit
+        run: |
+          set -euo pipefail
+
+          if git status --porcelain | grep .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: address issue #${{ github.event.issue.number }} via Codex"
+            git push origin "${{ steps.branch.outputs.branch }}"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes produced by Codex CLI; skipping commit."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TITLE="Codex: ${{ github.event.issue.title }}"
+          BODY="Automated Codex workflow for issue #${{ github.event.issue.number }}."
+
+          gh pr create \
+            --head "${{ steps.branch.outputs.branch }}" \
+            --base "$DEFAULT_BRANCH" \
+            --title "$TITLE" \
+            --body "$BODY"

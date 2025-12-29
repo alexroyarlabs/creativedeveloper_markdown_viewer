@@ -1,0 +1,184 @@
+name: Deploy Frontend Infra
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Deploy frontend infra and update env files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          update_env_file() {
+            local env_file="$1"
+            local bucket_name="$2"
+            local cloudfront_url="$3"
+
+            awk -v bucket_name="$bucket_name" -v cloudfront_url="$cloudfront_url" '
+              BEGIN {
+                found_bucket=0
+                found_cf=0
+              }
+              /^frontend_bucket_name=/ {
+                print "frontend_bucket_name=" bucket_name
+                found_bucket=1
+                next
+              }
+              /^frontend_cloudfront_url=/ {
+                print "frontend_cloudfront_url=" cloudfront_url
+                found_cf=1
+                next
+              }
+              { print }
+              END {
+                if (!found_bucket) {
+                  print "frontend_bucket_name=" bucket_name
+                }
+                if (!found_cf) {
+                  print "frontend_cloudfront_url=" cloudfront_url
+                }
+              }
+            ' "$env_file" > "${env_file}.tmp"
+            mv "${env_file}.tmp" "$env_file"
+          }
+
+          deploy_env() {
+            local env_file="$1"
+            if [[ ! -f "$env_file" ]]; then
+              echo "Missing environment file: $env_file"
+              exit 1
+            fi
+
+            set -a
+            # shellcheck disable=SC1090
+            source "$env_file"
+            set +a
+
+            if [[ -z "${stack_name:-}" ]]; then
+              echo "stack_name missing in $env_file"
+              exit 1
+            fi
+            if [[ -z "${region:-}" ]]; then
+              echo "region missing in $env_file"
+              exit 1
+            fi
+            if [[ -z "${environment:-}" ]]; then
+              echo "environment missing in $env_file"
+              exit 1
+            fi
+
+            local project_slug
+            project_slug="$(echo "$stack_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')"
+
+            aws cloudformation deploy \
+              --template-file infra/frontend/template.yaml \
+              --stack-name "$stack_name" \
+              --region "$region" \
+              --parameter-overrides Environment="$environment" ProjectSlug="$project_slug" \
+              --no-fail-on-empty-changeset
+
+            local bucket_name
+            bucket_name="$(aws cloudformation describe-stacks \
+              --stack-name "$stack_name" \
+              --region "$region" \
+              --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+              --output text)"
+
+            local cloudfront_url
+            cloudfront_url="$(aws cloudformation describe-stacks \
+              --stack-name "$stack_name" \
+              --region "$region" \
+              --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionDomainName'].OutputValue" \
+              --output text)"
+
+            if [[ -z "$bucket_name" || "$bucket_name" == "None" ]]; then
+              echo "FrontendBucketName output missing for $stack_name"
+              exit 1
+            fi
+            if [[ -z "$cloudfront_url" || "$cloudfront_url" == "None" ]]; then
+              echo "FrontendDistributionDomainName output missing for $stack_name"
+              exit 1
+            fi
+
+            update_env_file "$env_file" "$bucket_name" "$cloudfront_url"
+          }
+
+          deploy_env ".env.dev"
+          deploy_env ".env.prod"
+
+      - name: Commit and push env updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if ! git diff --quiet -- .env.dev .env.prod; then
+            git add .env.dev .env.prod
+            git commit -m "chore(infra): update frontend outputs"
+            git push
+          fi
+
+      - name: Upload index.html to frontend buckets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          upload_index() {
+            local env_file="$1"
+            if [[ ! -f "$env_file" ]]; then
+              echo "Missing environment file: $env_file"
+              exit 1
+            fi
+
+            set -a
+            # shellcheck disable=SC1090
+            source "$env_file"
+            set +a
+
+            if [[ -z "${stack_name:-}" ]]; then
+              echo "stack_name missing in $env_file"
+              exit 1
+            fi
+            if [[ -z "${region:-}" ]]; then
+              echo "region missing in $env_file"
+              exit 1
+            fi
+            if [[ -z "${frontend_bucket_name:-}" ]]; then
+              echo "frontend_bucket_name missing in $env_file"
+              exit 1
+            fi
+
+            local tmp_file
+            tmp_file="$(mktemp)"
+            printf '%s\n' "$stack_name" > "$tmp_file"
+
+            aws s3 cp \
+              "$tmp_file" \
+              "s3://${frontend_bucket_name}/index.html" \
+              --region "$region" \
+              --content-type "text/html"
+
+            rm -f "$tmp_file"
+          }
+
+          upload_index ".env.dev"
+          upload_index ".env.prod"

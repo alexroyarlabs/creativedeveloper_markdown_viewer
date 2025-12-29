@@ -1,0 +1,73 @@
+name: Update environment files
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack_name:
+        description: Stack name to store in .env files
+        required: true
+        type: string
+      region:
+        description: AWS region to store in .env files
+        required: false
+        default: eu-west-1
+        type: string
+      backend_bucket_artifacts_name:
+        description: Backend artifacts bucket name to store in .env files
+        required: false
+        default: creativedeveloper_deployments_artifacts
+        type: string
+
+jobs:
+  update-env:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Update .env.dev and .env.prod
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          update_env() {
+            local file="$1"
+            local key="$2"
+            local value="$3"
+
+            if grep -q "^${key}=" "$file"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$file"
+            fi
+          }
+
+          for env_file in .env.dev .env.prod; do
+            env_name="${env_file##*.}"
+            stack_value="${{ inputs.stack_name }}-${env_name}"
+
+            update_env "$env_file" "stack_name" "$stack_value"
+            update_env "$env_file" "region" "${{ inputs.region }}"
+            update_env "$env_file" "backend_bucket_artifacts_name" "${{ inputs.backend_bucket_artifacts_name }}"
+          done
+
+      - name: Commit and push changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branch="${GITHUB_REF_NAME}"
+
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          git add .env.dev .env.prod
+          git commit -m "Update environment parameters"
+          git push origin "HEAD:${branch}"

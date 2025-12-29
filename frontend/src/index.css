@@ -1,0 +1,149 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Work+Sans:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --page-bg: #0b1020;
+  --surface: rgba(15, 23, 42, 0.92);
+  --surface-alt: rgba(30, 41, 59, 0.92);
+  --ink: #f8fafc;
+  --ink-muted: #94a3b8;
+  --primary: #22d3ee;
+  --secondary: #f59e0b;
+  --border: #1f2a44;
+  --glow: rgba(34, 211, 238, 0.25);
+}
+
+body {
+  font-family: "Work Sans", sans-serif;
+  background: var(--page-bg);
+  color: var(--ink);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.bg-grid {
+  background-image: radial-gradient(
+      rgba(148, 163, 184, 0.22) 1px,
+      transparent 1px
+    ),
+    radial-gradient(rgba(148, 163, 184, 0.15) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: 0 0, 14px 14px;
+  opacity: 0.35;
+}
+
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+@keyframes fadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0px);
+  }
+}
+
+.float-slow {
+  animation: float 12s ease-in-out infinite;
+}
+
+.reveal {
+  animation: fadeUp 0.6s ease both;
+}
+
+.reveal-delay-1 {
+  animation-delay: 120ms;
+}
+
+.reveal-delay-2 {
+  animation-delay: 240ms;
+}
+
+.markdown {
+  color: var(--ink);
+  line-height: 1.7;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin-top: 1.6rem;
+  margin-bottom: 0.6rem;
+  color: var(--ink);
+}
+
+.markdown p {
+  margin: 0.65rem 0;
+  color: var(--ink-muted);
+}
+
+.markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown code {
+  background: rgba(30, 41, 59, 0.85);
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.45rem;
+  font-size: 0.9rem;
+}
+
+.markdown pre {
+  background: #0b1220;
+  color: #f8fafc;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  overflow: auto;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4rem;
+  color: var(--ink-muted);
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2rem 0;
+  font-size: 0.95rem;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 0.65rem 0.8rem;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-alt);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.markdown tr:nth-child(even) td {
+  background: rgba(30, 41, 59, 0.6);
+}
